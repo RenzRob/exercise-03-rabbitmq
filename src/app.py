@@ -26,6 +26,34 @@ def health(db: Session = Depends(get_db)):
     return {"status": "ok", "db": db_status, "nodes_count": count}
 
 
+RABBITMQ_URL = os.environ.get("RABBITMQ_URL", "amqp://guest:guest@rabbitmq:5672/")
+QUEUE_NAME = "node_events"
+
+
+def publish_event(event: str, node_name: str) -> None:
+    try:
+        params = pika.URLParameters(RABBITMQ_URL)
+        conn = pika.BlockingConnection(params)
+        ch = conn.channel()
+        ch.queue_declare(queue=QUEUE_NAME, durable=True)
+        # ISO8601 with Z suffix for UTC
+        timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        message = {"event": event, "node_name": node_name, "timestamp": timestamp}
+        ch.basic_publish(
+            exchange="",
+            routing_key=QUEUE_NAME,
+            body=json.dumps(message),
+            properties=pika.BasicProperties(delivery_mode=2),
+        )
+        try:
+            conn.close()
+        except Exception:
+            pass
+    except Exception:
+        # Best-effort: do not break API if messaging fails
+        pass
+
+
 @app.post("/api/nodes", response_model=NodeResponse, status_code=201)
 def register_node(node: NodeCreate, db: Session = Depends(get_db)):
     existing = db.query(Node).filter(Node.name == node.name).first()
@@ -35,28 +63,7 @@ def register_node(node: NodeCreate, db: Session = Depends(get_db)):
     db.add(db_node)
     db.commit()
     db.refresh(db_node)
-    # Publish event to RabbitMQ (best-effort)
-    try:
-        rabbit_url = os.environ.get("RABBITMQ_URL")
-        if rabbit_url:
-            params = pika.URLParameters(rabbit_url)
-            conn = pika.BlockingConnection(params)
-            ch = conn.channel()
-            ch.queue_declare(queue="node_events", durable=True)
-            payload = {
-                "event": "node_registered",
-                "node_name": db_node.name,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            }
-            ch.basic_publish(
-                exchange="", routing_key="node_events", body=json.dumps(payload)
-            )
-            try:
-                conn.close()
-            except Exception:
-                pass
-    except Exception:
-        pass
+    publish_event("node_registered", db_node.name)
     return db_node
 
 
@@ -96,28 +103,7 @@ def delete_node(name: str, db: Session = Depends(get_db)):
     node.status = "inactive"
     node.updated_at = datetime.now(timezone.utc)
     db.commit()
-    # Publish event to RabbitMQ (best-effort)
-    try:
-        rabbit_url = os.environ.get("RABBITMQ_URL")
-        if rabbit_url:
-            params = pika.URLParameters(rabbit_url)
-            conn = pika.BlockingConnection(params)
-            ch = conn.channel()
-            ch.queue_declare(queue="node_events", durable=True)
-            payload = {
-                "event": "node_deleted",
-                "node_name": node.name,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            }
-            ch.basic_publish(
-                exchange="", routing_key="node_events", body=json.dumps(payload)
-            )
-            try:
-                conn.close()
-            except Exception:
-                pass
-    except Exception:
-        pass
+    publish_event("node_deleted", node.name)
     return Response(status_code=204)
 
 

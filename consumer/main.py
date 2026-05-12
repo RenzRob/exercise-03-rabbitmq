@@ -12,57 +12,47 @@ Acknowledges each message after processing.
 
 import json
 import os
-import sys
 import time
 
 import pika
 
+RABBITMQ_URL = os.environ.get("RABBITMQ_URL", "amqp://guest:guest@rabbitmq:5672/")
+QUEUE_NAME = "node_events"
 
-def get_rabbit_url() -> str:
-    return os.environ.get("RABBITMQ_URL", "amqp://guest:guest@rabbitmq:5672/")
+
+def callback(ch, method, properties, body):
+    try:
+        payload = json.loads(body)
+        event = payload.get("event", "unknown")
+        node_name = payload.get("node_name", "unknown")
+        timestamp = payload.get("timestamp", "unknown")
+        print(f"EVENT: {event} | node: {node_name} | time: {timestamp}", flush=True)
+    except Exception as e:
+        print(f"[ERROR] Failed to process message: {e}", flush=True)
+    ch.basic_ack(delivery_tag=method.delivery_tag)
+
+
+def connect_with_retry(url: str, retries: int = 10, delay: int = 3):
+    for attempt in range(1, retries + 1):
+        try:
+            params = pika.URLParameters(url)
+            connection = pika.BlockingConnection(params)
+            print("[INFO] Connected to RabbitMQ", flush=True)
+            return connection
+        except Exception as e:
+            print(f"[WARN] Attempt {attempt}/{retries} failed: {e}", flush=True)
+            time.sleep(delay)
+    raise RuntimeError("Could not connect to RabbitMQ after multiple attempts")
 
 
 def main():
-    url = get_rabbit_url()
-    params = pika.URLParameters(url)
-    while True:
-        try:
-            conn = pika.BlockingConnection(params)
-            channel = conn.channel()
-            channel.queue_declare(queue="node_events", durable=True)
-
-            def callback(ch, method, properties, body):
-                try:
-                    payload = json.loads(body)
-                    event = payload.get("event")
-                    node_name = payload.get("node_name")
-                    timestamp = payload.get("timestamp")
-                    print(f"EVENT: {event} | node: {node_name} | time: {timestamp}")
-                    sys.stdout.flush()
-                except Exception:
-                    print("EVENT: invalid_message | node: unknown | time: unknown")
-                    sys.stdout.flush()
-                ch.basic_ack(delivery_tag=method.delivery_tag)
-
-            channel.basic_consume(queue="node_events", on_message_callback=callback)
-            print("Consumer started, waiting for messages...")
-            sys.stdout.flush()
-            channel.start_consuming()
-
-        except KeyboardInterrupt:
-            try:
-                conn.close()
-            except Exception:
-                pass
-            print("Consumer stopped by user")
-            break
-        except Exception:
-            # Retry connection after a short delay
-            try:
-                conn.close()
-            except Exception:
-                pass
-            time.sleep(2)
+    connection = connect_with_retry(RABBITMQ_URL)
+    channel = connection.channel()
+    channel.queue_declare(queue=QUEUE_NAME, durable=True)
+    channel.basic_qos(prefetch_count=1)
+    channel.basic_consume(queue=QUEUE_NAME, on_message_callback=callback)
+    print(f"[INFO] Waiting for messages on queue '{QUEUE_NAME}'...", flush=True)
+    channel.start_consuming()
 
 
 if __name__ == "__main__":
