@@ -1,0 +1,26 @@
+src/app.py
+  s_08928e4ef529e4::t_03799b1e050e3a 29-56,66,106
+consumer/main.py
+  h_c044bf8701ab58 19-20,23-32,35-45,48-55
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.6",
+  "base_commit_sha": "5b8c0fe394274fe40e5b0d44863c60ac2570bd73",
+  "prompts": {},
+  "humans": {
+    "h_c044bf8701ab58": {
+      "author": "rrobles_meli <renzo.robles@mercadolibre.com>"
+    }
+  },
+  "sessions": {
+    "s_08928e4ef529e4": {
+      "agent_id": {
+        "tool": "github-copilot",
+        "id": "5689f445-5c9b-4319-ba71-0f381b83da35",
+        "model": "unknown"
+      },
+      "human_author": "rrobles_meli <renzo.robles@mercadolibre.com>"
+    }
+  }
+}
